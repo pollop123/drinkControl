@@ -1,7 +1,7 @@
-Flask==2.0.1
-line-bot-sdk==2.1.0
-google-auth==2.1.0
-google-auth-oauthlib==0.4.6
-google-auth-httplib2==0.1.0
-google-api-python-client==2.15.0
-Werkzeug==0.16.1
+Flask
+line-bot-sdk
+google-auth
+google-auth-oauthlib
+google-auth-httplib2
+google-api-python-client
+Werkzeug
