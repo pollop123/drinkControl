@@ -1,37 +1,47 @@
+import os
+import json
+from flask import Flask, request, abort
 from linebot import LineBotApi, WebhookHandler
 from linebot.exceptions import InvalidSignatureError
 from linebot.models import MessageEvent, TextMessage, TextSendMessage
-import os.path
 from google.oauth2 import service_account
-import google.auth
 from googleapiclient.discovery import build
-from flask import Flask, request, abort
-import re
 
-# 設定Line Bot的Channel Secret和Access Token
-line_bot_api = LineBotApi('Or51MZMEpmO44ahCt4PjwygnkbY76Pepve3pmoCUrj2qwyBcfKz+OlLCpsR8WZ8nIY5NPCdY3aXEKq8uQ2OJObUs6x52RwlXRwwJx3Jma4NbE5q/OzwVI1S9UYxavAEIz9dFs0DkW/w4DMHk7/uw/wdB04t89/1O/w1cDnyilFU=')
-handler = WebhookHandler('626f45744c18177d7e4c0b0934e8f16c')
-
-# 設定Google Sheets API的認證
-SCOPES = ['https://www.googleapis.com/auth/spreadsheets']
-SERVICE_ACCOUNT_FILE = 'drinking-control-fd0b44375d5c.json'
-
-credentials = service_account.Credentials.from_service_account_file(
-    SERVICE_ACCOUNT_FILE, scopes=SCOPES)
-service = build('sheets', 'v4', credentials=credentials)
-
-# 設定Flask應用
 app = Flask(__name__)
 
-# 儲存用戶的Google Sheets ID
+# LINE Bot的設定
+LINE_CHANNEL_ACCESS_TOKEN = os.getenv('LINE_CHANNEL_ACCESS_TOKEN')
+LINE_CHANNEL_SECRET = os.getenv('LINE_CHANNEL_SECRET')
+
+line_bot_api = LineBotApi(LINE_CHANNEL_ACCESS_TOKEN)
+handler = WebhookHandler(LINE_CHANNEL_SECRET)
+
+# Google Sheets API的設定
+SCOPES = ['https://www.googleapis.com/auth/spreadsheets']
+SERVICE_ACCOUNT_INFO = os.getenv('GOOGLE_SERVICE_ACCOUNT_INFO')
+
+if SERVICE_ACCOUNT_INFO:
+    service_account_info = json.loads(SERVICE_ACCOUNT_INFO)
+    credentials = service_account.Credentials.from_service_account_info(
+        service_account_info, scopes=SCOPES)
+else:
+    raise ValueError("No Google service account info found in environment variables")
+
+service = build('sheets', 'v4', credentials=credentials)
+
+# 全局變量來存儲 Google Sheet ID
 user_sheets = {}
 
 @app.route("/callback", methods=['POST'])
 def callback():
-    # 獲取Line的請求體
+    # 取得請求的簽名
     signature = request.headers['X-Line-Signature']
-    body = request.get_data(as_text=True)
 
+    # 取得請求的body
+    body = request.get_data(as_text=True)
+    app.logger.info("Request body: " + body)
+
+    # 驗證簽名
     try:
         handler.handle(body, signature)
     except InvalidSignatureError:
@@ -44,41 +54,41 @@ def handle_message(event):
     user_id = event.source.user_id
     user_message = event.message.text
 
-    # 檢查是否是Google Sheets連結
-    sheet_id = extract_sheet_id(user_message)
-    if sheet_id:
-        user_sheets[user_id] = sheet_id
-        reply_text = "已記錄您的Google Sheets連結！"
+    if user_id not in user_sheets:
+        # 如果用戶還沒有提供 Google Sheet 链接，請求他們提供
+        line_bot_api.reply_message(
+            event.reply_token,
+            TextSendMessage(text="請提供您的 Google Sheet 連結")
+        )
+        # 將 Google Sheet ID 提取出來並存儲
+        user_sheets[user_id] = user_message.split('/')[-2]  # 假設用戶直接提供完整的 Google Sheet 链接
     else:
-        if user_id in user_sheets:
-            # 如果用戶已經提供了Sheets連結，將消息記錄到Sheet中
-            SPREADSHEET_ID = user_sheets[user_id]
-            RANGE_NAME = 'Sheet1!A1'  # 修改為你的Sheet和範圍
-            value_input_option = 'RAW'
-            values = [
-                [user_message],
-            ]
-            body = {
-                'values': values
-            }
-            result = service.spreadsheets().values().append(
-                spreadsheetId=SPREADSHEET_ID, range=RANGE_NAME,
-                valueInputOption=value_input_option, body=body).execute()
-            reply_text = "已將您的訊息保存到Google Sheets!"
-        else:
-            reply_text = "請先提供您的Google Sheets連結。"
+        # 用戶已經提供了 Google Sheet 連結，將訊息追加到相應的表格中
+        try:
+            append_values(user_sheets[user_id], user_message)
+            response_message = "訊息已儲存到Google Sheets"
+        except Exception as e:
+            response_message = f"無法儲存訊息到Google Sheets: {str(e)}"
 
-    # 回應用戶
-    line_bot_api.reply_message(
-        event.reply_token,
-        TextSendMessage(text=reply_text))
+        line_bot_api.reply_message(
+            event.reply_token,
+            TextSendMessage(text=response_message)
+        )
 
-def extract_sheet_id(url):
-    # 使用正則表達式提取Google Sheets ID
-    match = re.search(r"/spreadsheets/d/([a-zA-Z0-9-_]+)", url)
-    if match:
-        return match.group(1)
-    return None
+def append_values(spreadsheet_id, value):
+    # 準備資料
+    values = [[value]]
+    body = {
+        'values': values
+    }
+
+    # 呼叫 Google Sheets API 追加資料
+    result = service.spreadsheets().values().append(
+        spreadsheetId=spreadsheet_id,
+        range='Sheet1!A1',
+        valueInputOption='RAW',
+        body=body
+    ).execute()
 
 if __name__ == "__main__":
     app.run()
