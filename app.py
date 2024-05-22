@@ -82,13 +82,21 @@ def append_values(spreadsheet_id, value):
         'values': values
     }
 
+    # 獲取 A 列的下一個空白儲存格位置
+    result = service.spreadsheets().values().get(
+        spreadsheetId=spreadsheet_id,
+        range='Sheet1!A:A'
+    ).execute()
+    next_row = len(result.get('values', [])) + 1
+
     # 呼叫 Google Sheets API 追加資料
     result = service.spreadsheets().values().append(
         spreadsheetId=spreadsheet_id,
-        range='Sheet1!A1',
+        range=f'Sheet1!A{next_row}',
         valueInputOption='RAW',
         body=body
     ).execute()
+
 
 if __name__ == "__main__":
     app.run()
