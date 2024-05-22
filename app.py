@@ -1,139 +1,84 @@
-import random
-from readline import insert_text
-from this import s
+from linebot import LineBotApi, WebhookHandler
+from linebot.exceptions import InvalidSignatureError
+from linebot.models import MessageEvent, TextMessage, TextSendMessage
+import os.path
+from google.oauth2 import service_account
+import google.auth
+from googleapiclient.discovery import build
 from flask import Flask, request, abort
-import requests
-import json
-import urllib
 import re
-from linebot import (
-    LineBotApi, WebhookHandler
-)
-from linebot.exceptions import (
-    InvalidSignatureError
-)
-from linebot.models import (
-    MessageEvent, TextMessage, TextSendMessage,MemberJoinedEvent,FollowEvent,StickerSendMessage,MemberLeftEvent,ImageSendMessage,JoinEvent,AudioSendMessage,FlexSendMessage
 
-)
-
-
-app = Flask(__name__)
-
+# 設定Line Bot的Channel Secret和Access Token
 line_bot_api = LineBotApi('Or51MZMEpmO44ahCt4PjwygnkbY76Pepve3pmoCUrj2qwyBcfKz+OlLCpsR8WZ8nIY5NPCdY3aXEKq8uQ2OJObUs6x52RwlXRwwJx3Jma4NbE5q/OzwVI1S9UYxavAEIz9dFs0DkW/w4DMHk7/uw/wdB04t89/1O/w1cDnyilFU=')
 handler = WebhookHandler('626f45744c18177d7e4c0b0934e8f16c')
 
+# 設定Google Sheets API的認證
+SCOPES = ['https://www.googleapis.com/auth/spreadsheets']
+SERVICE_ACCOUNT_FILE = 'drinking-control-fd0b44375d5c.json'
+
+credentials = service_account.Credentials.from_service_account_file(
+    SERVICE_ACCOUNT_FILE, scopes=SCOPES)
+service = build('sheets', 'v4', credentials=credentials)
+
+# 設定Flask應用
+app = Flask(__name__)
+
+# 儲存用戶的Google Sheets ID
+user_sheets = {}
 
 @app.route("/callback", methods=['POST'])
 def callback():
-    # get X-Line-Signature header value
+    # 獲取Line的請求體
     signature = request.headers['X-Line-Signature']
-    # get request body as text
     body = request.get_data(as_text=True)
-    app.logger.info("Request body: " + body)
-    # handle webhook body
+
     try:
         handler.handle(body, signature)
     except InvalidSignatureError:
-        print("Invalid signature. Please check your channel access token/channel secret.")
         abort(400)
-    return 'OK'
-  
 
-@handler.add(JoinEvent)#進群打招呼
-def join(event):
-    sticker=StickerSendMessage(package_id='789',sticker_id='10855')
-    line_bot_api.reply_message(event.reply_token,sticker)
-@handler.add(FollowEvent)#加好友介紹功能
-def follow(event):
-    uid = event.source.user_id
-    profile = line_bot_api.get_profile(uid)
-    name = profile.display_name
-    message = TextSendMessage(text=f'{name}歡迎')
-    mes2=TextSendMessage(text="可以問我去哪裡吃飯或吃甚麼喔")
-    mes3=TextSendMessage(text="更可以問我什麼是什麼東西喔")
-    ca=json.load(open('ca.json','r',encoding='utf-8'))
-    mes4=FlexSendMessage('profile',ca)
-    line_bot_api.reply_message(event.reply_token, [message,mes2,mes3,mes4])
-@handler.add(MemberJoinedEvent)#入群歡迎詞
-def welcome(event):
-    uid = event.joined.members[0].user_id
-    gid = event.source.group_id
-    profile = line_bot_api.get_group_member_profile(gid, uid)
-    name = profile.display_name
-    message = TextSendMessage(text=f'{name}歡迎加入')
-    line_bot_api.reply_message(event.reply_token,message )
+    return 'OK'
+
 @handler.add(MessageEvent, message=TextMessage)
 def handle_message(event):
-    Sendstring=''
-    if"去哪吃" in event.message.text:
-        Sendstring="當然是"+places()+"啊"
-    elif"吃什麼" in event.message.text:
-        Sendstring="當然是"+foods()+"啊"
-    elif"要不要" in event.message.text:
-        Sendstring="我覺得"+ok()
-    elif"什麼時候" in event.message.text:
-        Sendstring=when()
-    elif"什麼是" in event.message.text:
-        cmd=event.message.text.split("是")
-        try:
-         q_string = {'tbm': 'isch', 'q': cmd[1]}
-         url = f"https://www.google.com/search?{urllib.parse.urlencode(q_string)}/"
-         headers = {'User-Agent':'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/76.0.3809.132 Safari/537.36'}
+    user_id = event.source.user_id
+    user_message = event.message.text
 
-         req = urllib.request.Request(url, headers = headers)
-         conn = urllib.request.urlopen(req)
-
-         print('fetch conn finish')
-
-         pattern = 'img data-src="\S*"'
-         img_list = []
-
-         for match in re.finditer(pattern, str(conn.read())):
-          img_list.append(match.group()[14:-1])
-
-         random_img_url = img_list[random.randint(0, len(img_list)+1)]
-         print('fetch img url finish')
-         print(random_img_url)
-
-         line_bot_api.reply_message(
-         event.reply_token,
-         ImageSendMessage(
-         original_content_url=random_img_url,
-         preview_image_url=random_img_url)
-         )
-        except:
-         line_bot_api.reply_message(
-         event.reply_token,
-         TextSendMessage(text="我....我也不知道"))
-    elif"天氣" in event.message.text:
-        weather=event.message.text.split(" ")
-        city = weather[1]
-        city = city.replace('台','臺')
-        line_bot_api.reply_message(event.reply_token, TextSendMessage)(
-        text=city+"的我不知道"
-        )
+    # 檢查是否是Google Sheets連結
+    sheet_id = extract_sheet_id(user_message)
+    if sheet_id:
+        user_sheets[user_id] = sheet_id
+        reply_text = "已記錄您的Google Sheets連結！"
     else:
-        Sendstring=event.message.text
+        if user_id in user_sheets:
+            # 如果用戶已經提供了Sheets連結，將消息記錄到Sheet中
+            SPREADSHEET_ID = user_sheets[user_id]
+            RANGE_NAME = 'Sheet1!A1'  # 修改為你的Sheet和範圍
+            value_input_option = 'RAW'
+            values = [
+                [user_message],
+            ]
+            body = {
+                'values': values
+            }
+            result = service.spreadsheets().values().append(
+                spreadsheetId=SPREADSHEET_ID, range=RANGE_NAME,
+                valueInputOption=value_input_option, body=body).execute()
+            reply_text = "已將您的訊息保存到Google Sheets!"
+        else:
+            reply_text = "請先提供您的Google Sheets連結。"
+
+    # 回應用戶
     line_bot_api.reply_message(
         event.reply_token,
-        TextSendMessage(text=Sendstring))
-def places():
-    placeslist=["南樓","北樓","中正樓"]
-    return placeslist[random.randint(0,len(placeslist)-1)]
-def foods():
-    foodslist=["炒飯","肉燥飯","肉燥麵","紅油炒手","水餃","關東煮",]
-    return foodslist[random.randint(0,len(foodslist)-1)]
-def ok():
-    oklist=["要","不要"]
-    return oklist[random.randint(0,len(oklist)-1)]
-def when():
-    whenlist=["現在","等一下","五分鐘後","一小時後","不久的將來","未來","不要做啦"]
-    return whenlist[random.randint(0,len(whenlist)-1)]
-@app.route('/')
-def index():
-     return 'hello world'
-import os
+        TextSendMessage(text=reply_text))
+
+def extract_sheet_id(url):
+    # 使用正則表達式提取Google Sheets ID
+    match = re.search(r"/spreadsheets/d/([a-zA-Z0-9-_]+)", url)
+    if match:
+        return match.group(1)
+    return None
+
 if __name__ == "__main__":
-    port = int(os.environ.get('PORT', 5000))
-    app.run(host='0.0.0.0', port=port)
+    app.run()
