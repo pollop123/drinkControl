@@ -22,12 +22,18 @@ SCOPES = ['https://www.googleapis.com/auth/spreadsheets']
 GOOGLE_SHEETS_API_KEY = os.getenv('GOOGLE_SHEETS_API_KEY')
 
 if GOOGLE_SHEETS_API_KEY:
-    credentials = Credentials.from_authorized_user_info(
-        {"token": None, "scopes": SCOPES, "expiry": None},
-        api_key=GOOGLE_SHEETS_API_KEY
+    credentials = Credentials(
+        token=None,
+        scopes=SCOPES,
+        expiry=None,
+        quota_project_id=None,
+        client_id=None,
+        client_secret=None,
+        api_key=GOOGLE_SHEETS_API_KEY,
     )
 else:
     raise ValueError("No Google Sheets API key found in environment variables")
+
 
 service = build('sheets', 'v4', credentials=credentials)
 
