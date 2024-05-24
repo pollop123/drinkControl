@@ -29,8 +29,10 @@ else:
 
 service = build('sheets', 'v4', credentials=credentials)
 
-# 全局變量來存儲 Google Sheet ID
+# 全局變量來存儲 Google Sheet ID 和用戶的輸入狀態
 user_sheets = {}
+user_input_stage = {}
+user_input_data = {}
 
 @app.route("/callback", methods=['POST'])
 def callback():
@@ -56,47 +58,75 @@ def handle_message(event):
 
     if user_id not in user_sheets:
         # 如果用戶還沒有提供 Google Sheet 链接，請求他們提供
-        line_bot_api.reply_message(
-            event.reply_token,
-            TextSendMessage(text="請提供您的 Google Sheet 連結")
-        )
-        # 將 Google Sheet ID 提取出來並存儲
         user_sheets[user_id] = user_message.split('/')[-2]  # 假設用戶直接提供完整的 Google Sheet 链接
-    else:
-        # 用戶已經提供了 Google Sheet 連結，將訊息追加到相應的表格中
-        try:
-            append_values(user_sheets[user_id], user_message)
-            response_message = "訊息已儲存到Google Sheets"
-        except Exception as e:
-            response_message = f"無法儲存訊息到Google Sheets: {str(e)}"
-
+        user_input_stage[user_id] = 'category'  # 初始化输入阶段
+        user_input_data[user_id] = {}  # 初始化输入数据
         line_bot_api.reply_message(
             event.reply_token,
-            TextSendMessage(text=response_message)
+            TextSendMessage(text="已成功連結到您的 Google Sheet。請輸入種類")
         )
+    else:
+        # 根據當前的輸入階段來處理用戶的輸入
+        stage = user_input_stage.get(user_id, 'category')
+        if stage == 'category':
+            user_input_data[user_id]['category'] = user_message
+            user_input_stage[user_id] = 'name'
+            line_bot_api.reply_message(
+                event.reply_token,
+                TextSendMessage(text="請輸入名稱")
+            )
+        elif stage == 'name':
+            user_input_data[user_id]['name'] = user_message
+            user_input_stage[user_id] = 'calories'
+            line_bot_api.reply_message(
+                event.reply_token,
+                TextSendMessage(text="請輸入大卡")
+            )
+        elif stage == 'calories':
+            user_input_data[user_id]['calories'] = user_message
+            # 所有數據已收集完畢，將其保存到 Google Sheets
+            try:
+                append_values(user_sheets[user_id], user_input_data[user_id])
+                response_message = "訊息已儲存到Google Sheets"
+            except Exception as e:
+                response_message = f"無法儲存訊息到Google Sheets: {str(e)}"
+            
+            # 重置用户输入阶段
+            user_input_stage[user_id] = 'category'
+            user_input_data[user_id] = {}
 
-def append_values(spreadsheet_id, value):
+            line_bot_api.reply_message(
+                event.reply_token,
+                TextSendMessage(text=response_message)
+            )
+
+def append_values(spreadsheet_id, data):
     # 準備資料
-    values = [[value]]
+    values = [[data['category'], data['name'], data['calories']]]
     body = {
         'values': values
     }
 
-    # 獲取 A 列的下一個空白儲存格位置
+    # 獲取 A 列的所有資料
     result = service.spreadsheets().values().get(
         spreadsheetId=spreadsheet_id,
-        range='Sheet1!A:A'
+        range='Sheet1!A1:C'
     ).execute()
-    next_row = len(result.get('values', [])) + 1
+    rows = result.get('values', [])
+
+    # 計算下一個空白儲存格的位置
+    next_row = len(rows) + 1
+    next_cell = f'Sheet1!A{next_row}'
 
     # 呼叫 Google Sheets API 追加資料
     result = service.spreadsheets().values().append(
         spreadsheetId=spreadsheet_id,
-        range=f'Sheet1!A{next_row}',
+        range=next_cell,
         valueInputOption='RAW',
         body=body
     ).execute()
 
+    print(f"成功追加資料到 {next_cell}")
 
 if __name__ == "__main__":
-    app.run()
+    app.run(host='0.0.0.0', port=int(os.environ.get('PORT', 5000)))
