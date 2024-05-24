@@ -58,16 +58,29 @@ def handle_message(event):
 
     if user_id not in user_sheets:
         # 如果用戶還沒有提供 Google Sheet 链接，請求他們提供
-        user_sheets[user_id] = user_message.split('/')[-2]  # 假設用戶直接提供完整的 Google Sheet 链接
+        line_bot_api.reply_message(
+            event.reply_token,
+            TextSendMessage(text="請提供您的 Google Sheet 連結")
+        )
+        # 等待用户提供链接，将链接解析并存储
+        user_sheets[user_id] = None
+    elif user_sheets[user_id] is None:
+        # 保存用户提供的 Google Sheet 链接
+        user_sheets[user_id] = user_message.split('/')[-2]  # 假设用户直接提供完整的 Google Sheet 链接
+        line_bot_api.reply_message(
+            event.reply_token,
+            TextSendMessage(text="已成功連結到您的 Google Sheet。請輸入 '新增' 開始新增資料")
+        )
+    elif user_message == '新增':
         user_input_stage[user_id] = 'category'  # 初始化输入阶段
         user_input_data[user_id] = {}  # 初始化输入数据
         line_bot_api.reply_message(
             event.reply_token,
-            TextSendMessage(text="已成功連結到您的 Google Sheet。請輸入種類")
+            TextSendMessage(text="請輸入種類")
         )
     else:
-        # 根據當前的輸入階段來處理用戶的輸入
-        stage = user_input_stage.get(user_id, 'category')
+        # 根据当前的输入阶段来处理用户的输入
+        stage = user_input_stage.get(user_id, None)
         if stage == 'category':
             user_input_data[user_id]['category'] = user_message
             user_input_stage[user_id] = 'name'
@@ -84,7 +97,7 @@ def handle_message(event):
             )
         elif stage == 'calories':
             user_input_data[user_id]['calories'] = user_message
-            # 所有數據已收集完畢，將其保存到 Google Sheets
+            # 所有数据已收集完毕，将其保存到 Google Sheets
             try:
                 append_values(user_sheets[user_id], user_input_data[user_id])
                 response_message = "訊息已儲存到Google Sheets"
@@ -92,33 +105,38 @@ def handle_message(event):
                 response_message = f"無法儲存訊息到Google Sheets: {str(e)}"
             
             # 重置用户输入阶段
-            user_input_stage[user_id] = 'category'
+            user_input_stage[user_id] = None
             user_input_data[user_id] = {}
 
             line_bot_api.reply_message(
                 event.reply_token,
                 TextSendMessage(text=response_message)
             )
+        else:
+            line_bot_api.reply_message(
+                event.reply_token,
+                TextSendMessage(text="無法識別的命令或輸入。請輸入 '新增' 開始新增資料")
+            )
 
 def append_values(spreadsheet_id, data):
-    # 準備資料
+    # 准备数据
     values = [[data['category'], data['name'], data['calories']]]
     body = {
         'values': values
     }
 
-    # 獲取 A 列的所有資料
+    # 获取 A 列的所有数据
     result = service.spreadsheets().values().get(
         spreadsheetId=spreadsheet_id,
         range='Sheet1!A1:C'
     ).execute()
     rows = result.get('values', [])
 
-    # 計算下一個空白儲存格的位置
+    # 计算下一个空白单元格的位置
     next_row = len(rows) + 1
     next_cell = f'Sheet1!A{next_row}'
 
-    # 呼叫 Google Sheets API 追加資料
+    # 调用 Google Sheets API 追加数据
     result = service.spreadsheets().values().append(
         spreadsheetId=spreadsheet_id,
         range=next_cell,
