@@ -6,7 +6,6 @@ from linebot.exceptions import InvalidSignatureError
 from linebot.models import MessageEvent, TextMessage, TextSendMessage
 from google.oauth2 import service_account
 from googleapiclient.discovery import build
-from google.oauth2.credentials import Credentials
 
 app = Flask(__name__)
 
@@ -19,21 +18,14 @@ handler = WebhookHandler(LINE_CHANNEL_SECRET)
 
 # Google Sheets API的設定
 SCOPES = ['https://www.googleapis.com/auth/spreadsheets']
-GOOGLE_SHEETS_API_KEY = os.getenv('GOOGLE_SHEETS_API_KEY')
+SERVICE_ACCOUNT_INFO = os.getenv('GOOGLE_SERVICE_ACCOUNT_INFO')
 
-if GOOGLE_SHEETS_API_KEY:
-    credentials = Credentials(
-        token=None,
-        scopes=SCOPES,
-        expiry=None,
-        quota_project_id=None,
-        client_id=None,
-        client_secret=None,
-        api_key=GOOGLE_SHEETS_API_KEY,
-    )
+if SERVICE_ACCOUNT_INFO:
+    service_account_info = json.loads(SERVICE_ACCOUNT_INFO)
+    credentials = service_account.Credentials.from_service_account_info(
+        service_account_info, scopes=SCOPES)
 else:
-    raise ValueError("No Google Sheets API key found in environment variables")
-
+    raise ValueError("No Google service account info found in environment variables")
 
 service = build('sheets', 'v4', credentials=credentials)
 
