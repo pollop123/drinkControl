@@ -2,6 +2,7 @@ import os
 import json
 import re
 import openpyxl
+from datetime import datetime, timedelta
 from flask import Flask, request, abort
 from linebot import LineBotApi, WebhookHandler
 from linebot.exceptions import InvalidSignatureError
@@ -91,6 +92,35 @@ def handle_message(event):
             TextSendMessage(text="請輸入種類")
         )
 
+    elif user_message == '清除':
+        try:
+            clear_sheet(user_sheets[user_id])
+            response_message = "已清除所有資料"
+        except Exception as e:
+            response_message = f"無法清除資料: {str(e)}"
+        line_bot_api.reply_message(
+            event.reply_token,
+            TextSendMessage(text=response_message)
+        )
+
+    elif user_message == '刪除上一筆':
+        try:
+            delete_last_entry(user_sheets[user_id])
+            response_message = "已刪除最新的一筆資料"
+        except Exception as e:
+            response_message = f"無法刪除資料: {str(e)}"
+        line_bot_api.reply_message(
+            event.reply_token,
+            TextSendMessage(text=response_message)
+        )
+
+    elif user_message == '加總':
+        user_input_stage[user_id] = 'sum_period'
+        line_bot_api.reply_message(
+            event.reply_token,
+            TextSendMessage(text="請輸入 '1天' 或 '7天' 來加總大卡")
+        )
+
     else:
         stage = user_input_stage.get(user_id, None)
         if stage == 'category':
@@ -109,6 +139,7 @@ def handle_message(event):
             )
         elif stage == 'calories':
             user_input_data[user_id]['calories'] = user_message
+            user_input_data[user_id]['timestamp'] = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
             try:
                 append_values(user_sheets[user_id], user_input_data[user_id])
                 response_message = "訊息已儲存到Google Sheets"
@@ -118,6 +149,22 @@ def handle_message(event):
             user_input_stage[user_id] = None
             user_input_data[user_id] = {}
 
+            line_bot_api.reply_message(
+                event.reply_token,
+                TextSendMessage(text=response_message)
+            )
+        elif stage == 'sum_period':
+            try:
+                if user_message in ['1天', '7天']:
+                    days = 1 if user_message == '1天' else 7
+                    total_calories = sum_calories(user_sheets[user_id], days)
+                    response_message = f"{user_message} 的總大卡為 {total_calories} 大卡"
+                else:
+                    response_message = "無效的輸入，請輸入 '1天' 或 '7天'"
+            except Exception as e:
+                response_message = f"無法計算總大卡: {str(e)}"
+            
+            user_input_stage[user_id] = None
             line_bot_api.reply_message(
                 event.reply_token,
                 TextSendMessage(text=response_message)
@@ -133,9 +180,37 @@ def append_values(spreadsheet_id, data):
     sheet = gc.open_by_key(spreadsheet_id).sheet1
 
     # 將資料新增到試算表
-    row = [data['category'], data['name'], data['calories']]
+    row = [data['timestamp'], data['category'], data['name'], data['calories']]
     sheet.append_row(row)
     print(f"成功將資料 {row} 新增到試算表 {spreadsheet_id}")
+
+def clear_sheet(spreadsheet_id):
+    sheet = gc.open_by_key(spreadsheet_id).sheet1
+    sheet.clear()
+    print(f"已清除試算表 {spreadsheet_id} 的所有資料")
+
+def delete_last_entry(spreadsheet_id):
+    sheet = gc.open_by_key(spreadsheet_id).sheet1
+    cell = sheet.find('timestamp')
+    last_row = len(sheet.get_all_values())
+    if last_row > 1:  # 確保試算表至少有一行資料
+        sheet.delete_rows(last_row)
+        print(f"已刪除試算表 {spreadsheet_id} 的最新一筆資料")
+    else:
+        print("試算表中無可刪除的資料")
+
+def sum_calories(spreadsheet_id, days):
+    sheet = gc.open_by_key(spreadsheet_id).sheet1
+    all_records = sheet.get_all_records()
+    now = datetime.now()
+    total_calories = 0
+
+    for record in all_records:
+        record_time = datetime.strptime(record['timestamp'], '%Y-%m-%d %H:%M:%S')
+        if now - timedelta(days=days) <= record_time <= now:
+            total_calories += int(record['calories'])
+    
+    return total_calories
 
 if __name__ == "__main__":
     app.run(host='0.0.0.0', port=int(os.environ.get('PORT', 5000)))
