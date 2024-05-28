@@ -27,7 +27,7 @@ if SERVICE_ACCOUNT_INFO:
     service_account_info = json.loads(SERVICE_ACCOUNT_INFO)
     credentials = Credentials.from_service_account_info(service_account_info, scopes=SCOPES)
 else:
-    raise ValueError("No Google service account info found in environment variables")
+    raise ValueError("環境變數中找不到 Google 服務帳戶資訊")
 
 gc = gspread.authorize(credentials)
 
@@ -78,8 +78,10 @@ def handle_message(event):
                 add_headers(spreadsheet_id)
                 line_bot_api.reply_message(
                     event.reply_token,
-                    TextSendMessage(text="已成功連結到您的 Google Sheet。")
-                    ,TextSendMessage(text="請輸入 '新增' 開始新增資料，輸入 '清除' 刪除所有資料，輸入 '刪除上一筆' 刪除上一筆新增資料，輸入 '加總' 加總大卡")
+                    [
+                        TextSendMessage(text="已成功連結到您的 Google Sheet。"),
+                        TextSendMessage(text="請輸入 '新增' 開始新增資料，輸入 '清除' 刪除所有資料，輸入 '刪除上一筆' 刪除上一筆新增資料，輸入 '加總' 加總大卡")
+                    ]
                 )
             except Exception as e:
                 line_bot_api.reply_message(
@@ -89,7 +91,7 @@ def handle_message(event):
         else:
             line_bot_api.reply_message(
                 event.reply_token,
-                TextSendMessage(text="無效的 Google Sheet 連結,請重新提供")
+                TextSendMessage(text="無效的 Google Sheet 連結，請重新提供")
             )
 
     elif user_message == '新增':
@@ -180,15 +182,18 @@ def handle_message(event):
         else:
             line_bot_api.reply_message(
                 event.reply_token,
-                TextSendMessage(text="無法識別的命令")
-                ,TextSendMessage(text="請輸入 '新增' 開始新增資料，輸入 '清除' 刪除所有資料，輸入 '刪除上一筆' 刪除上一筆新增資料，輸入 '加總' 加總大卡")
+                [
+                    TextSendMessage(text="無法識別的命令"),
+                    TextSendMessage(text="請輸入 '新增' 開始新增資料，輸入 '清除' 刪除所有資料，輸入 '刪除上一筆' 刪除上一筆新增資料，輸入 '加總' 加總大卡")
+                ]
             )
 
 def add_headers(spreadsheet_id):
     sheet = gc.open_by_key(spreadsheet_id).sheet1
     headers = ['timestamp', 'category', 'name', 'calories']
-    sheet.insert_row(headers, 1)
-    print(f"已添加標題行到試算表 {spreadsheet_id}")
+    if sheet.row_values(1) != headers:
+        sheet.insert_row(headers, 1)
+        print(f"已添加標題行到試算表 {spreadsheet_id}")
 
 def append_values(spreadsheet_id, data):
     sheet = gc.open_by_key(spreadsheet_id).sheet1
