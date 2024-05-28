@@ -80,7 +80,7 @@ def handle_message(event):
                     event.reply_token,
                     [
                         TextSendMessage(text="已成功連結到您的 Google Sheet。"),
-                        TextSendMessage(text="請輸入 '新增' 開始新增資料，輸入 '清除' 刪除所有資料，輸入 '刪除上一筆' 刪除上一筆新增資料，輸入 '加總' 加總大卡")
+                        TextSendMessage(text="請輸入 '新增' 開始新增資料，輸入 '清除' 刪除所有資料，輸入 '刪除上一筆' 刪除上一筆新增資料，輸入 '加總' 加總大卡，輸入 '飲食比例' 獲取各種類食物的熱量比例")
                     ]
                 )
             except Exception as e:
@@ -129,6 +129,17 @@ def handle_message(event):
         line_bot_api.reply_message(
             event.reply_token,
             TextSendMessage(text="請輸入 '1天' 或 '7天' 來加總大卡")
+        )
+
+    elif user_message == '飲食比例':
+        try:
+            category_ratios = calculate_category_ratios(user_sheets[user_id])
+            response_message = "飲食比例:\n" + "\n".join([f"{category}: {ratio:.2f}%" for category, ratio in category_ratios.items()])
+        except Exception as e:
+            response_message = f"無法計算飲食比例: {str(e)}"
+        line_bot_api.reply_message(
+            event.reply_token,
+            TextSendMessage(text=response_message)
         )
 
     else:
@@ -184,7 +195,7 @@ def handle_message(event):
                 event.reply_token,
                 [
                     TextSendMessage(text="無法識別的命令"),
-                    TextSendMessage(text="請輸入 '新增' 開始新增資料，輸入 '清除' 刪除所有資料，輸入 '刪除上一筆' 刪除上一筆新增資料，輸入 '加總' 加總大卡")
+                    TextSendMessage(text="請輸入 '新增' 開始新增資料，輸入 '清除' 刪除所有資料，輸入 '刪除上一筆' 刪除上一筆新增資料，輸入 '加總' 加總大卡，輸入 '飲食比例' 獲取各種類食物的熱量比例")
                 ]
             )
 
@@ -220,14 +231,26 @@ def sum_calories(spreadsheet_id, days):
     sheet = gc.open_by_key(spreadsheet_id).sheet1
     all_records = sheet.get_all_records()
     now = datetime.utcnow() + timedelta(hours=8)
-    total_calories = 0
-
-    for record in all_records:
-        record_time = datetime.strptime(record['timestamp'], '%Y-%m-%d %H:%M:%S')
-        if now - timedelta(days=days) <= record_time <= now:
-            total_calories += int(record['calories'])
-    
+    total_calories = sum(int(record['calories']) for record in all_records if (now - datetime.strptime(record['timestamp'], '%Y-%m-%d %H:%M:%S')).days < days)
     return total_calories
 
+def calculate_category_ratios(spreadsheet_id):
+    sheet = gc.open_by_key(spreadsheet_id).sheet1
+    all_records = sheet.get_all_records()
+    category_totals = {}
+    total_calories = 0
+    
+    for record in all_records:
+        category = record['category']
+        calories = int(record['calories'])
+        total_calories += calories
+        if category in category_totals:
+            category_totals[category] += calories
+        else:
+            category_totals[category] = calories
+    
+    category_ratios = {category: (calories / total_calories) * 100 for category, calories in category_totals.items()}
+    return category_ratios
+
 if __name__ == "__main__":
-    app.run(host='0.0.0.0', port=int(os.environ.get('PORT', 5000)))
+    app.run(debug=True)
