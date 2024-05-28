@@ -1,8 +1,5 @@
-Flask
-line-bot-sdk
-google-auth
-google-auth-oauthlib
-google-auth-httplib2
-google-api-python-client
-python-dotenv
 openpyxl
+flask
+line-bot-sdk
+gspread
+google-auth
