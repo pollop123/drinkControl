@@ -139,7 +139,7 @@ def handle_message(event):
             )
         elif stage == 'calories':
             user_input_data[user_id]['calories'] = user_message
-            user_input_data[user_id]['timestamp'] = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+            user_input_data[user_id]['timestamp'] = (datetime.utcnow() + timedelta(hours=8)).strftime('%Y-%m-%d %H:%M:%S')
             try:
                 append_values(user_sheets[user_id], user_input_data[user_id])
                 response_message = "訊息已儲存到Google Sheets"
@@ -187,11 +187,12 @@ def append_values(spreadsheet_id, data):
 def clear_sheet(spreadsheet_id):
     sheet = gc.open_by_key(spreadsheet_id).sheet1
     sheet.clear()
+    # 添加標題行
+    sheet.append_row(['timestamp', 'category', 'name', 'calories'])
     print(f"已清除試算表 {spreadsheet_id} 的所有資料")
 
 def delete_last_entry(spreadsheet_id):
     sheet = gc.open_by_key(spreadsheet_id).sheet1
-    cell = sheet.find('timestamp')
     last_row = len(sheet.get_all_values())
     if last_row > 1:  # 確保試算表至少有一行資料
         sheet.delete_rows(last_row)
@@ -202,7 +203,7 @@ def delete_last_entry(spreadsheet_id):
 def sum_calories(spreadsheet_id, days):
     sheet = gc.open_by_key(spreadsheet_id).sheet1
     all_records = sheet.get_all_records()
-    now = datetime.now()
+    now = datetime.utcnow() + timedelta(hours=8)
     total_calories = 0
 
     for record in all_records:
