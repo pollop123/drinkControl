@@ -1,13 +1,13 @@
 import os
 import json
 import re
+import openpyxl
 from flask import Flask, request, abort
 from linebot import LineBotApi, WebhookHandler
 from linebot.exceptions import InvalidSignatureError
 from linebot.models import MessageEvent, TextMessage, TextSendMessage
-from google.oauth2 import service_account
-from googleapiclient.discovery import build
-import openpyxl
+from google.oauth2.service_account import Credentials
+import gspread
 
 app = Flask(__name__)
 
@@ -29,7 +29,7 @@ if SERVICE_ACCOUNT_INFO:
 else:
     raise ValueError("No Google service account info found in environment variables")
 
-service = build('sheets', 'v4', credentials=credentials)
+gc = gspread.authorize(credentials)
 
 # 全域變數存儲用戶輸入狀態
 user_sheets = {}
@@ -130,26 +130,13 @@ def handle_message(event):
             )
 
 def append_values(spreadsheet_id, data):
-    values = [[data['category'], data['name'], data['calories']]]
-    body = {'values': values}
-    
-    result = service.spreadsheets().values().get(
-        spreadsheetId=spreadsheet_id,
-        range='Sheet1!A1:C'
-    ).execute()
-    rows = result.get('values', [])
+    # 使用 gspread 開啟指定的試算表
+    sheet = gc.open_by_key(spreadsheet_id).sheet1
 
-    next_row = len(rows) + 1
-    next_cell = f'Sheet1!A{next_row}'
-
-    result = service.spreadsheets().values().append(
-        spreadsheetId=spreadsheet_id,
-        range=next_cell,
-        valueInputOption='RAW',
-        body=body
-    ).execute()
-
-    print(f"成功追加資料到 {next_cell}")
+    # 將資料新增到試算表
+    row = [data['category'], data['name'], data['calories']]
+    sheet.append_row(row)
+    print(f"成功將資料 {row} 新增到試算表 {spreadsheet_id}")
 
 if __name__ == "__main__":
     app.run(host='0.0.0.0', port=int(os.environ.get('PORT', 5000)))
