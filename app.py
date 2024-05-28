@@ -9,6 +9,7 @@ from linebot.exceptions import InvalidSignatureError
 from linebot.models import MessageEvent, TextMessage, TextSendMessage
 from google.oauth2.service_account import Credentials
 import gspread
+import food
 
 app = Flask(__name__)
 
@@ -142,8 +143,27 @@ def handle_message(event):
             TextSendMessage(text=response_message)
         )
 
+    elif user_message == '查詢大卡':
+        user_input_stage[user_id] = 'query_kcal'
+        line_bot_api.reply_message(
+            event.reply_token,
+            TextSendMessage(text="請輸入要查詢的食物名稱")
+        )
+
     else:
         stage = user_input_stage.get(user_id, None)
+        if stage == 'query_kcal':
+            search_kcal(user_message)
+            if search_kcal(user_message) is None:
+                response_message = f"抱歉，我們的資料庫中沒有 '{user_message}' 的熱量資訊"
+            else:
+                response_message = f"查詢成功"
+            user_input_stage[user_id] = None
+            line_bot_api.reply_message(
+                event.reply_token,
+                TextSendMessage(text=response_message)
+            )
+
         if stage == 'category':
             user_input_data[user_id]['category'] = user_message
             user_input_stage[user_id] = 'name'
@@ -199,6 +219,12 @@ def handle_message(event):
                 ]
             )
 
+def search_kcal(name):
+    for key in food_dict.keys():
+        if name in key:
+            print(f"品項：{key}, 熱量：{int(food_dict[key][0])} kcal, 份量：{food_dict[key][1]}")
+            return
+        
 def add_headers(spreadsheet_id):
     sheet = gc.open_by_key(spreadsheet_id).sheet1
     headers = ['timestamp', 'category', 'name', 'calories']
