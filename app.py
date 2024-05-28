@@ -24,8 +24,7 @@ SERVICE_ACCOUNT_INFO = os.getenv('GOOGLE_SERVICE_ACCOUNT_INFO')
 
 if SERVICE_ACCOUNT_INFO:
     service_account_info = json.loads(SERVICE_ACCOUNT_INFO)
-    credentials = service_account.Credentials.from_service_account_info(
-        service_account_info, scopes=SCOPES)
+    credentials = Credentials.from_service_account_info(service_account_info, scopes=SCOPES)
 else:
     raise ValueError("No Google service account info found in environment variables")
 
