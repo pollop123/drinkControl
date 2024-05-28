@@ -74,10 +74,18 @@ def handle_message(event):
         spreadsheet_id = get_spreadsheet_id(user_message)
         if spreadsheet_id:
             user_sheets[user_id] = spreadsheet_id
-            line_bot_api.reply_message(
-                event.reply_token,
-                TextSendMessage(text="已成功連結到您的 Google Sheet。請輸入 '新增' 開始新增資料")
-            )
+            try:
+                add_headers(spreadsheet_id)
+                line_bot_api.reply_message(
+                    event.reply_token,
+                    TextSendMessage(text="已成功連結到您的 Google Sheet。")
+                    ,TextSendMessage(text="請輸入 '新增' 開始新增資料，輸入 '清除' 刪除所有資料，輸入 '刪除上一筆' 刪除上一筆新增資料，輸入 '加總' 加總大卡")
+                )
+            except Exception as e:
+                line_bot_api.reply_message(
+                    event.reply_token,
+                    TextSendMessage(text=f"連結失敗或無法添加標題行: {str(e)}")
+                )
         else:
             line_bot_api.reply_message(
                 event.reply_token,
@@ -172,14 +180,18 @@ def handle_message(event):
         else:
             line_bot_api.reply_message(
                 event.reply_token,
-                TextSendMessage(text="無法識別的命令或輸入。請輸入 '新增' 開始新增資料")
+                TextSendMessage(text="無法識別的命令")
+                ,TextSendMessage(text="請輸入 '新增' 開始新增資料，輸入 '清除' 刪除所有資料，輸入 '刪除上一筆' 刪除上一筆新增資料，輸入 '加總' 加總大卡")
             )
 
-def append_values(spreadsheet_id, data):
-    # 使用 gspread 開啟指定的試算表
+def add_headers(spreadsheet_id):
     sheet = gc.open_by_key(spreadsheet_id).sheet1
+    headers = ['timestamp', 'category', 'name', 'calories']
+    sheet.insert_row(headers, 1)
+    print(f"已添加標題行到試算表 {spreadsheet_id}")
 
-    # 將資料新增到試算表
+def append_values(spreadsheet_id, data):
+    sheet = gc.open_by_key(spreadsheet_id).sheet1
     row = [data['timestamp'], data['category'], data['name'], data['calories']]
     sheet.append_row(row)
     print(f"成功將資料 {row} 新增到試算表 {spreadsheet_id}")
@@ -187,14 +199,13 @@ def append_values(spreadsheet_id, data):
 def clear_sheet(spreadsheet_id):
     sheet = gc.open_by_key(spreadsheet_id).sheet1
     sheet.clear()
-    # 添加標題行
     sheet.append_row(['timestamp', 'category', 'name', 'calories'])
     print(f"已清除試算表 {spreadsheet_id} 的所有資料")
 
 def delete_last_entry(spreadsheet_id):
     sheet = gc.open_by_key(spreadsheet_id).sheet1
     last_row = len(sheet.get_all_values())
-    if last_row > 1:  # 確保試算表至少有一行資料
+    if last_row > 1:
         sheet.delete_rows(last_row)
         print(f"已刪除試算表 {spreadsheet_id} 的最新一筆資料")
     else:
