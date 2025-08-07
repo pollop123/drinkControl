@@ -117,7 +117,7 @@ def handle_message(event):
                     event.reply_token,
                     [
                         TextSendMessage(text="已成功連結到您的 Google Sheet。"),
-                        TextSendMessage(text="請輸入 '新增' 開始新增資料，輸入 '清除' 刪除所有資料，輸入 '刪除上一筆' 刪除上一筆新增資料，輸入 '加總' 加總大卡，輸入 '飲食比例' 獲取各種類的熱量比例，輸入 '查詢大卡' 獲取各種食物的熱量")
+                        TextSendMessage(text="您現在可以傳送圖片來分析熱量，或輸入以下指令：\n'新增'：開始新增資料\n'清除'：刪除所有資料\n'刪除上一筆'：刪除上一筆新增資料\n'加總'：加總大卡\n'飲食比例'：獲取各種類的熱量比例\n'查詢大卡'：獲取各種食物的熱量")
                     ]
                 )
             except Exception as e:

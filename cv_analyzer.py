@@ -1,13 +1,13 @@
 
 from ultralytics import YOLO
 
-# Initialize the YOLO model. 
-# This will download the yolov8n.pt model on the first run.
-model = YOLO('yolov8n.pt') 
+# The model is now initialized inside the function to support lazy loading.
+model = None
 
 def analyze_image(image_path):
     """
     Analyzes an image using YOLOv8 to detect objects.
+    The model is loaded on the first call to this function.
 
     Args:
         image_path (str): The path to the image file.
@@ -16,6 +16,13 @@ def analyze_image(image_path):
         dict: A dictionary with item and calorie information 
               if a 'bottle' is detected, otherwise None.
     """
+    global model
+    # Initialize the model only if it hasn't been initialized yet.
+    if model is None:
+        print("Initializing YOLO model for the first time...")
+        model = YOLO('yolov8n.pt')
+        print("YOLO model initialized.")
+
     # Run prediction on the image
     results = model.predict(image_path, verbose=False)
 
