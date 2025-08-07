@@ -3,3 +3,5 @@ flask
 line-bot-sdk
 gspread
 google-auth
+ultralytics
+opencv-python-headless
