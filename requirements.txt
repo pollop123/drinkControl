@@ -1,3 +1,4 @@
+python-dotenv
 openpyxl
 flask
 line-bot-sdk
