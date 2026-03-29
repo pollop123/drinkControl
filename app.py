@@ -1,5 +1,8 @@
 import os
 import json
+from dotenv import load_dotenv
+
+load_dotenv()
 import re
 import openpyxl
 from datetime import datetime, timedelta
@@ -15,19 +18,21 @@ from food import food_dict
 app = Flask(__name__)
 
 # LINE Bot設定
-LINE_CHANNEL_ACCESS_TOKEN = os.getenv('LINE_CHANNEL_ACCESS_TOKEN')
-LINE_CHANNEL_SECRET = os.getenv('LINE_CHANNEL_SECRET')
+LINE_CHANNEL_ACCESS_TOKEN = os.getenv("LINE_CHANNEL_ACCESS_TOKEN")
+LINE_CHANNEL_SECRET = os.getenv("LINE_CHANNEL_SECRET")
 
 line_bot_api = LineBotApi(LINE_CHANNEL_ACCESS_TOKEN)
 handler = WebhookHandler(LINE_CHANNEL_SECRET)
 
 # Google Sheets API設定
-SCOPES = ['https://www.googleapis.com/auth/spreadsheets']
-SERVICE_ACCOUNT_INFO = os.getenv('GOOGLE_SERVICE_ACCOUNT_INFO')
+SCOPES = ["https://www.googleapis.com/auth/spreadsheets"]
+SERVICE_ACCOUNT_INFO = os.getenv("GOOGLE_SERVICE_ACCOUNT_INFO")
 
 if SERVICE_ACCOUNT_INFO:
     service_account_info = json.loads(SERVICE_ACCOUNT_INFO)
-    credentials = Credentials.from_service_account_info(service_account_info, scopes=SCOPES)
+    credentials = Credentials.from_service_account_info(
+        service_account_info, scopes=SCOPES
+    )
 else:
     raise ValueError("環境變數中找不到 Google 服務帳戶資訊")
 
@@ -38,18 +43,20 @@ user_sheets = {}
 user_input_stage = {}
 user_input_data = {}
 
+
 # 解析 Google Sheet 連結以獲取 spreadsheetId
 def get_spreadsheet_id(url):
-    pattern = r'\/spreadsheets\/d\/([a-zA-Z0-9-_]+)'
+    pattern = r"\/spreadsheets\/d\/([a-zA-Z0-9-_]+)"
     match = re.search(pattern, url)
     if match:
         return match.group(1)
     else:
         return None
 
-@app.route("/callback", methods=['POST'])
+
+@app.route("/callback", methods=["POST"])
 def callback():
-    signature = request.headers['X-Line-Signature']
+    signature = request.headers["X-Line-Signature"]
     body = request.get_data(as_text=True)
     app.logger.info("Request body: " + body)
 
@@ -58,42 +65,52 @@ def callback():
     except InvalidSignatureError:
         abort(400)
 
-    return 'OK'
+    return "OK"
+
 
 @handler.add(MessageEvent, message=ImageMessage)
 def handle_image_message(event):
     message_id = event.message.id
-    temp_image_path = f'{message_id}.jpg'
+    temp_image_path = f"{message_id}.jpg"
 
     try:
         message_content = line_bot_api.get_message_content(message_id)
-        with open(temp_image_path, 'wb') as fd:
+        with open(temp_image_path, "wb") as fd:
             for chunk in message_content.iter_content():
                 fd.write(chunk)
 
         analysis_result = analyze_image(temp_image_path)
 
-        if analysis_result:
-            item = analysis_result['item']
-            calories = analysis_result['calories']
-            response_message = f"偵測到: {item}\n熱量約: {calories} 大卡"
+        if analysis_result and analysis_result.get("detections"):
+            detections = analysis_result["detections"]
+            if len(detections) == 1:
+                d = detections[0]
+                response_message = f"偵測到: {d['item']}\n熱量約: {d['calories']} 大卡"
+            else:
+                lines = ["偵測到多種食物:"]
+                total = 0
+                for d in detections:
+                    lines.append(f"• {d['item']}: {d['calories']} 大卡")
+                    total += d["calories"]
+                lines.append(f"\n總熱量約: {total} 大卡")
+                response_message = "\n".join(lines)
         else:
             response_message = "抱歉，無法辨識圖片中的食物或飲料。"
 
         line_bot_api.reply_message(
-            event.reply_token,
-            TextSendMessage(text=response_message)
+            event.reply_token, TextSendMessage(text=response_message)
         )
 
     except Exception as e:
         app.logger.error(f"Error processing image: {e}")
         line_bot_api.reply_message(
             event.reply_token,
-            TextSendMessage(text="處理圖片時發生錯誤，請稍後再試。 সন")
+            TextSendMessage(text="處理圖片時發生錯誤，請稍後再試。 সন"),
         )
     finally:
         if os.path.exists(temp_image_path):
             os.remove(temp_image_path)
+
 
 @handler.add(MessageEvent, message=TextMessage)
 def handle_message(event):
@@ -102,8 +119,7 @@ def handle_message(event):
 
     if user_id not in user_sheets:
         line_bot_api.reply_message(
-            event.reply_token,
-            TextSendMessage(text="請提供您的 Google Sheet 連結")
+            event.reply_token, TextSendMessage(text="請提供您的 Google Sheet 連結")
         )
         user_sheets[user_id] = None
 
@@ -117,170 +133,179 @@ def handle_message(event):
                     event.reply_token,
                     [
                         TextSendMessage(text="已成功連結到您的 Google Sheet。"),
-                        TextSendMessage(text="您現在可以傳送圖片來分析熱量，或輸入以下指令：\n'新增'：開始新增資料\n'清除'：刪除所有資料\n'刪除上一筆'：刪除上一筆新增資料\n'加總'：加總大卡\n'飲食比例'：獲取各種類的熱量比例\n'查詢大卡'：獲取各種食物的熱量")
-                    ]
+                        TextSendMessage(
+                            text="您現在可以傳送圖片來分析熱量，或輸入以下指令：\n'新增'：開始新增資料\n'清除'：刪除所有資料\n'刪除上一筆'：刪除上一筆新增資料\n'加總'：加總大卡\n'飲食比例'：獲取各種類的熱量比例\n'查詢大卡'：獲取各種食物的熱量"
+                        ),
+                    ],
                 )
             except Exception as e:
                 line_bot_api.reply_message(
                     event.reply_token,
-                    TextSendMessage(text=f"連結失敗或無法添加標題行: {str(e)}")
+                    TextSendMessage(text=f"連結失敗或無法添加標題行: {str(e)}"),
                 )
         else:
             line_bot_api.reply_message(
                 event.reply_token,
-                TextSendMessage(text="無效的 Google Sheet 連結，請重新提供")
+                TextSendMessage(text="無效的 Google Sheet 連結，請重新提供"),
             )
 
-    elif user_message == '新增':
-        user_input_stage[user_id] = 'category'
+    elif user_message == "新增":
+        user_input_stage[user_id] = "category"
         user_input_data[user_id] = {}
         line_bot_api.reply_message(
-            event.reply_token,
-            TextSendMessage(text="請輸入種類")
+            event.reply_token, TextSendMessage(text="請輸入種類")
         )
 
-    elif user_message == '清除':
+    elif user_message == "清除":
         try:
             clear_sheet(user_sheets[user_id])
             response_message = "已清除所有資料"
         except Exception as e:
             response_message = f"無法清除資料: {str(e)}"
         line_bot_api.reply_message(
-            event.reply_token,
-            TextSendMessage(text=response_message)
+            event.reply_token, TextSendMessage(text=response_message)
         )
 
-    elif user_message == '刪除上一筆':
+    elif user_message == "刪除上一筆":
         try:
             delete_last_entry(user_sheets[user_id])
             response_message = "已刪除最新的一筆資料"
         except Exception as e:
             response_message = f"無法刪除資料: {str(e)}"
         line_bot_api.reply_message(
-            event.reply_token,
-            TextSendMessage(text=response_message)
+            event.reply_token, TextSendMessage(text=response_message)
         )
 
-    elif user_message == '加總':
-        user_input_stage[user_id] = 'sum_period'
+    elif user_message == "加總":
+        user_input_stage[user_id] = "sum_period"
         line_bot_api.reply_message(
-            event.reply_token,
-            TextSendMessage(text="請輸入 '1天' 或 '7天' 來加總大卡")
+            event.reply_token, TextSendMessage(text="請輸入 '1天' 或 '7天' 來加總大卡")
         )
 
-    elif user_message == '飲食比例':
+    elif user_message == "飲食比例":
         try:
             category_ratios = calculate_category_ratios(user_sheets[user_id])
-            response_message = "飲食比例:\n" + "\n".join([f"{category}: {ratio:.2f}%" for category, ratio in category_ratios.items()])
+            response_message = "飲食比例:\n" + "\n".join(
+                [
+                    f"{category}: {ratio:.2f}%"
+                    for category, ratio in category_ratios.items()
+                ]
+            )
         except Exception as e:
             response_message = f"無法計算飲食比例: {str(e)}"
         line_bot_api.reply_message(
-            event.reply_token,
-            TextSendMessage(text=response_message)
+            event.reply_token, TextSendMessage(text=response_message)
         )
 
-    elif user_message == '查詢大卡':
-        user_input_stage[user_id] = 'query_kcal'
+    elif user_message == "查詢大卡":
+        user_input_stage[user_id] = "query_kcal"
         line_bot_api.reply_message(
-            event.reply_token,
-            TextSendMessage(text="請輸入要查詢的食物名稱")
+            event.reply_token, TextSendMessage(text="請輸入要查詢的食物名稱")
         )
 
     else:
         stage = user_input_stage.get(user_id, None)
-        if stage == 'query_kcal':
+        if stage == "query_kcal":
             result = search_kcal(user_message)
             if result:
                 line_bot_api.reply_message(
-                    event.reply_token,
-                    TextSendMessage(text=result)
+                    event.reply_token, TextSendMessage(text=result)
                 )
             else:
                 line_bot_api.reply_message(
                     event.reply_token,
-                    TextSendMessage(text=f"抱歉，我們的資料庫中沒有 '{user_message}' 的熱量資訊")
+                    TextSendMessage(
+                        text=f"抱歉，我們的資料庫中沒有 '{user_message}' 的熱量資訊"
+                    ),
                 )
             user_input_stage[user_id] = None
 
-        if stage == 'category':
-            user_input_data[user_id]['category'] = user_message
-            user_input_stage[user_id] = 'name'
+        if stage == "category":
+            user_input_data[user_id]["category"] = user_message
+            user_input_stage[user_id] = "name"
             line_bot_api.reply_message(
-                event.reply_token,
-                TextSendMessage(text="請輸入名稱")
+                event.reply_token, TextSendMessage(text="請輸入名稱")
             )
-        elif stage == 'name':
-            user_input_data[user_id]['name'] = user_message
-            user_input_stage[user_id] = 'calories'
+        elif stage == "name":
+            user_input_data[user_id]["name"] = user_message
+            user_input_stage[user_id] = "calories"
             line_bot_api.reply_message(
-                event.reply_token,
-                TextSendMessage(text="請輸入大卡")
+                event.reply_token, TextSendMessage(text="請輸入大卡")
             )
-        elif stage == 'calories':
-            user_input_data[user_id]['calories'] = user_message
-            user_input_data[user_id]['timestamp'] = (datetime.utcnow() + timedelta(hours=8)).strftime('%Y-%m-%d %H:%M:%S')
+        elif stage == "calories":
+            user_input_data[user_id]["calories"] = user_message
+            user_input_data[user_id]["timestamp"] = (
+                datetime.utcnow() + timedelta(hours=8)
+            ).strftime("%Y-%m-%d %H:%M:%S")
             try:
                 append_values(user_sheets[user_id], user_input_data[user_id])
                 response_message = "訊息已儲存到Google Sheets"
             except Exception as e:
                 response_message = f"無法儲存訊息到Google Sheets: {str(e)}"
-            
+
             user_input_stage[user_id] = None
             user_input_data[user_id] = {}
 
             line_bot_api.reply_message(
-                event.reply_token,
-                TextSendMessage(text=response_message)
+                event.reply_token, TextSendMessage(text=response_message)
             )
-        elif stage == 'sum_period':
+        elif stage == "sum_period":
             try:
-                if user_message in ['1天', '7天']:
-                    days = 1 if user_message == '1天' else 7
+                if user_message in ["1天", "7天"]:
+                    days = 1 if user_message == "1天" else 7
                     total_calories = sum_calories(user_sheets[user_id], days)
-                    response_message = f"{user_message} 的總大卡為 {total_calories} 大卡"
+                    response_message = (
+                        f"{user_message} 的總大卡為 {total_calories} 大卡"
+                    )
                 else:
                     response_message = "無效的輸入，請輸入 '1天' 或 '7天'"
             except Exception as e:
                 response_message = f"無法計算總大卡: {str(e)}"
-            
+
             user_input_stage[user_id] = None
             line_bot_api.reply_message(
-                event.reply_token,
-                TextSendMessage(text=response_message)
+                event.reply_token, TextSendMessage(text=response_message)
             )
         else:
             line_bot_api.reply_message(
                 event.reply_token,
                 [
                     TextSendMessage(text="無法識別的命令"),
-                    TextSendMessage(text="請輸入 '新增' 開始新增資料，輸入 '清除' 刪除所有資料，輸入 '刪除上一筆' 刪除上一筆新增資料，輸入 '加總' 加總大卡，輸入 '飲食比例' 獲取各種類的熱量比例，輸入 '查詢大卡' 獲取各種食物的熱量")
-                ]
+                    TextSendMessage(
+                        text="請輸入 '新增' 開始新增資料，輸入 '清除' 刪除所有資料，輸入 '刪除上一筆' 刪除上一筆新增資料，輸入 '加總' 加總大卡，輸入 '飲食比例' 獲取各種類的熱量比例，輸入 '查詢大卡' 獲取各種食物的熱量"
+                    ),
+                ],
             )
+
 
 def search_kcal(name):
     for key in food_dict.keys():
         if name in key:
             return f"品項：{key}, 熱量：{int(food_dict[key][0])} kcal, 份量：{food_dict[key][1]}"
     return None
-        
+
+
 def add_headers(spreadsheet_id):
     sheet = gc.open_by_key(spreadsheet_id).sheet1
-    headers = ['timestamp', 'category', 'name', 'calories']
+    headers = ["timestamp", "category", "name", "calories"]
     if sheet.row_values(1) != headers:
         sheet.insert_row(headers, 1)
         print(f"已添加標題行到試算表 {spreadsheet_id}")
 
+
 def append_values(spreadsheet_id, data):
     sheet = gc.open_by_key(spreadsheet_id).sheet1
-    row = [data['timestamp'], data['category'], data['name'], data['calories']]
+    row = [data["timestamp"], data["category"], data["name"], data["calories"]]
     sheet.append_row(row)
     print(f"成功將資料 {row} 新增到試算表 {spreadsheet_id}")
+
 
 def clear_sheet(spreadsheet_id):
     sheet = gc.open_by_key(spreadsheet_id).sheet1
     sheet.clear()
-    sheet.append_row(['timestamp', 'category', 'name', 'calories'])
+    sheet.append_row(["timestamp", "category", "name", "calories"])
     print(f"已清除試算表 {spreadsheet_id} 的所有資料")
+
 
 def delete_last_entry(spreadsheet_id):
     sheet = gc.open_by_key(spreadsheet_id).sheet1
@@ -291,30 +316,41 @@ def delete_last_entry(spreadsheet_id):
     else:
         print("試算表中無可刪除的資料")
 
+
 def sum_calories(spreadsheet_id, days):
     sheet = gc.open_by_key(spreadsheet_id).sheet1
     all_records = sheet.get_all_records()
     now = datetime.utcnow() + timedelta(hours=8)
-    total_calories = sum(int(record['calories']) for record in all_records if (now - datetime.strptime(record['timestamp'], '%Y-%m-%d %H:%M:%S')).days < days)
+    total_calories = sum(
+        int(record["calories"])
+        for record in all_records
+        if (now - datetime.strptime(record["timestamp"], "%Y-%m-%d %H:%M:%S")).days
+        < days
+    )
     return total_calories
+
 
 def calculate_category_ratios(spreadsheet_id):
     sheet = gc.open_by_key(spreadsheet_id).sheet1
     all_records = sheet.get_all_records()
     category_totals = {}
     total_calories = 0
-    
+
     for record in all_records:
-        category = record['category']
-        calories = int(record['calories'])
+        category = record["category"]
+        calories = int(record["calories"])
         total_calories += calories
         if category in category_totals:
             category_totals[category] += calories
         else:
             category_totals[category] = calories
-    
-    category_ratios = {category: (calories / total_calories) * 100 for category, calories in category_totals.items()}
+
+    category_ratios = {
+        category: (calories / total_calories) * 100
+        for category, calories in category_totals.items()
+    }
     return category_ratios
+
 
 if __name__ == "__main__":
     app.run(debug=True)
