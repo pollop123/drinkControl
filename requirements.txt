@@ -4,5 +4,5 @@ flask
 line-bot-sdk
 gspread
 google-auth
-ultralytics
-opencv-python-headless
+Pillow
+openai>=1.66.0,<3

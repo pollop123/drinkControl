@@ -1,69 +1,78 @@
-from ultralytics import YOLO
+import base64
+import json
+import os
 
-model = None
+from openai import OpenAI
 
-FOOD_CALORIES = {
-    "bottle": ("瓶裝飲料", 150),
-    "wine glass": ("葡萄酒/酒杯", 125),
-    "cup": ("杯裝飲料", 100),
-    "banana": ("香蕉", 105),
-    "apple": ("蘋果", 95),
-    "orange": ("橘子", 62),
-    "broccoli": ("花椰菜", 55),
-    "carrot": ("胡蘿蔔", 25),
-    "hot dog": ("熱狗", 290),
-    "pizza": ("披薩", 285),
-    "donut": ("甜甜圈", 269),
-    "cake": ("蛋糕", 350),
-    "bowl": ("碗裝食物", 200),
-    "sandwich": ("三明治", 350),
+
+FOOD_ANALYSIS_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "detections": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "item": {"type": "string"},
+                    "calories": {"type": "integer", "minimum": 0},
+                    "confidence": {
+                        "type": "string",
+                        "enum": ["low", "medium", "high"],
+                    },
+                },
+                "required": ["item", "calories", "confidence"],
+                "additionalProperties": False,
+            },
+        }
+    },
+    "required": ["detections"],
+    "additionalProperties": False,
 }
+
+ANALYSIS_PROMPT = """分析照片中可食用的食物與飲料。
+辨識每個主要品項，以繁體中文命名，並依照片可見份量估算整份熱量（大卡）。
+不要把餐具、容器或同一品項的不同部分重複計算。
+若無法辨識任何食物或飲料，detections 回傳空陣列。
+confidence 表示品項與份量估算的整體可信度。"""
 
 
 def analyze_image(image_path):
-    global model
-    if model is None:
-        print("Initializing YOLO model...")
-        model = YOLO("yolov8n.pt")
-        print("YOLO model initialized.")
+    if os.getenv("CV_PROVIDER", "openai").lower() != "openai":
+        raise ValueError("CV_PROVIDER 目前僅支援 openai")
 
-    results = model.predict(image_path, verbose=False)
+    api_key = os.getenv("OPENAI_API_KEY")
+    if not api_key:
+        raise ValueError("環境變數中找不到 OPENAI_API_KEY")
 
-    detections = []
-    for result in results:
-        for box in result.boxes:
-            class_id = int(box.cls[0])
-            class_name = result.names[class_id]
+    with open(image_path, "rb") as image_file:
+        image_base64 = base64.b64encode(image_file.read()).decode("ascii")
 
-            if class_name in FOOD_CALORIES:
-                item, calories = FOOD_CALORIES[class_name]
-                detections.append({"item": item, "calories": calories})
+    client = OpenAI(api_key=api_key, timeout=30.0, max_retries=1)
+    response = client.responses.create(
+        model=os.getenv("OPENAI_VISION_MODEL", "gpt-4.1-mini"),
+        input=[
+            {
+                "role": "user",
+                "content": [
+                    {"type": "input_text", "text": ANALYSIS_PROMPT},
+                    {
+                        "type": "input_image",
+                        "image_url": f"data:image/jpeg;base64,{image_base64}",
+                        "detail": os.getenv("OPENAI_IMAGE_DETAIL", "low"),
+                    },
+                ],
+            }
+        ],
+        text={
+            "format": {
+                "type": "json_schema",
+                "name": "food_analysis",
+                "strict": True,
+                "schema": FOOD_ANALYSIS_SCHEMA,
+            }
+        },
+        max_output_tokens=300,
+    )
 
-    if detections:
-        return {"detections": detections}
-    return None
-
-
-if __name__ == "__main__":
-    test_image_path = "test_image.jpg"
-    try:
-        from PIL import Image
-        import numpy as np
-
-        try:
-            img = Image.open(test_image_path)
-        except FileNotFoundError:
-            print(f"Creating dummy test image: {test_image_path}")
-            dummy_array = np.zeros((416, 416, 3), dtype=np.uint8)
-            img = Image.fromarray(dummy_array)
-            img.save(test_image_path)
-
-        analysis_result = analyze_image(test_image_path)
-
-        if analysis_result:
-            print(f"Analysis Result: {analysis_result}")
-        else:
-            print("No food detected in the image.")
-
-    except Exception as e:
-        print(f"An error occurred: {e}")
+    result = json.loads(response.output_text)
+    return result if result["detections"] else None

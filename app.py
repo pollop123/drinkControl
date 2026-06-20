@@ -13,6 +13,7 @@ from linebot.models import MessageEvent, TextMessage, TextSendMessage, ImageMess
 from google.oauth2.service_account import Credentials
 import gspread
 from cv_analyzer import analyze_image
+from image_utils import compress_image
 from food import food_dict
 
 app = Flask(__name__)
@@ -20,6 +21,8 @@ app = Flask(__name__)
 # LINE Bot設定
 LINE_CHANNEL_ACCESS_TOKEN = os.getenv("LINE_CHANNEL_ACCESS_TOKEN")
 LINE_CHANNEL_SECRET = os.getenv("LINE_CHANNEL_SECRET")
+IMAGE_MAX_SIZE = int(os.getenv("IMAGE_MAX_SIZE", "768"))
+IMAGE_JPEG_QUALITY = int(os.getenv("IMAGE_JPEG_QUALITY", "88"))
 
 line_bot_api = LineBotApi(LINE_CHANNEL_ACCESS_TOKEN)
 handler = WebhookHandler(LINE_CHANNEL_SECRET)
@@ -79,6 +82,11 @@ def handle_image_message(event):
             for chunk in message_content.iter_content():
                 fd.write(chunk)
 
+        compress_image(
+            temp_image_path,
+            max_size=IMAGE_MAX_SIZE,
+            quality=IMAGE_JPEG_QUALITY,
+        )
         analysis_result = analyze_image(temp_image_path)
 
         if analysis_result and analysis_result.get("detections"):
@@ -105,7 +113,7 @@ def handle_image_message(event):
         app.logger.error(f"Error processing image: {e}")
         line_bot_api.reply_message(
             event.reply_token,
-            TextSendMessage(text="處理圖片時發生錯誤，請稍後再試。 সন"),
+            TextSendMessage(text="處理圖片時發生錯誤，請稍後再試。"),
         )
     finally:
         if os.path.exists(temp_image_path):
