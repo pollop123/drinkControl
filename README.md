@@ -55,6 +55,7 @@ cp .env.example .env
 | `LINE_CHANNEL_ACCESS_TOKEN` | 是 | LINE Messaging API Channel Access Token |
 | `LINE_CHANNEL_SECRET` | 是 | LINE Messaging API Channel Secret |
 | `GOOGLE_SERVICE_ACCOUNT_INFO` | 是 | Google 服務帳戶完整 JSON，需放在同一行 |
+| `CONFIG_SPREADSHEET_ID` | 是 | 保存 LINE 使用者與飲食 Sheet 綁定的 Config Sheet ID |
 | `OPENAI_API_KEY` | 是 | OpenAI API key |
 | `CV_PROVIDER` | 是 | 目前僅支援 `openai` |
 | `OPENAI_VISION_MODEL` | 否 | 圖片辨識模型，預設 `gpt-4.1-mini` |
@@ -120,6 +121,6 @@ LINE 圖片訊息
 ## 注意事項
 
 - 圖片辨識與熱量為估算值，不適合作為醫療或營養診斷依據。
-- 使用者的 Google Sheet 連結與輸入階段目前保存在應用程式記憶體中，服務重新啟動後需要重新連結。
+- 使用者的 Google Sheet 綁定保存在 Config Sheet；尚未完成的輸入階段仍只存在應用程式記憶體中。
 - 建議在 OpenAI 平台設定專案預算與用量通知。
 - 正式環境應檢查 Render logs，並監控 LINE webhook timeout 與 OpenAI API 錯誤。
