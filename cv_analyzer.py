@@ -14,13 +14,25 @@ FOOD_ANALYSIS_SCHEMA = {
                 "type": "object",
                 "properties": {
                     "item": {"type": "string"},
+                    "category": {
+                        "type": "string",
+                        "enum": [
+                            "主食",
+                            "蛋白質",
+                            "蔬菜",
+                            "水果",
+                            "飲料",
+                            "點心",
+                            "其他",
+                        ],
+                    },
                     "calories": {"type": "integer", "minimum": 0},
                     "confidence": {
                         "type": "string",
                         "enum": ["low", "medium", "high"],
                     },
                 },
-                "required": ["item", "calories", "confidence"],
+                "required": ["item", "category", "calories", "confidence"],
                 "additionalProperties": False,
             },
         }
@@ -31,6 +43,7 @@ FOOD_ANALYSIS_SCHEMA = {
 
 ANALYSIS_PROMPT = """分析照片中可食用的食物與飲料。
 辨識每個主要品項，以繁體中文命名，並依照片可見份量估算整份熱量（大卡）。
+category 請依品項歸類為主食、蛋白質、蔬菜、水果、飲料、點心或其他。
 不要把餐具、容器或同一品項的不同部分重複計算。
 若無法辨識任何食物或飲料，detections 回傳空陣列。
 confidence 表示品項與份量估算的整體可信度。"""

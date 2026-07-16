@@ -1,6 +1,6 @@
 # drinkControl
 
-drinkControl 是以 Flask 建立的 LINE 飲食紀錄 Bot。使用者可以傳送食物或飲料照片，由 OpenAI Vision 辨識品項並估算熱量，也可以透過文字指令將飲食資料寫入個人的 Google Sheet。
+drinkControl 是以 Flask 建立的 LINE 飲食紀錄 Bot。使用者可以傳送食物或飲料照片，由 OpenAI Vision 辨識品項並估算熱量，確認後寫入個人的 Google Sheet。
 
 ## 功能
 
@@ -8,29 +8,41 @@ drinkControl 是以 Flask 建立的 LINE 飲食紀錄 Bot。使用者可以傳�
 - 圖片送出前自動縮小，降低傳輸量與 API 成本
 - 使用 OpenAI Responses API 回傳結構化 JSON
 - 連結使用者提供的 Google Sheet
-- 新增與刪除飲食紀錄
+- 照片辨識後以按鈕確認或取消，自動新增飲食紀錄
+- 辨識結果可在儲存前修改熱量或重新拍照
+- 透過 LINE 快速按鈕新增、刪除與查詢紀錄
+- 可安裝常駐 LINE Rich Menu
+- 顯示今日熱量進度與最近 7 日總熱量
+- 每位使用者可設定自己的每日熱量目標
+- 以餐次識別碼整餐撤銷，不會只刪除照片中的最後一個品項
 - 統計最近 1 天或 7 天的總熱量
 - 計算各食物種類的熱量比例
 - 查詢內建食物資料庫的熱量與份量
 
-圖片辨識結果目前只會回覆到 LINE，不會自動寫入 Google Sheet。需要記錄資料時，請使用 `新增` 指令。
+圖片辨識完成後，Bot 會列出品項、預估熱量與可信度。按下「確認記錄」後，各品項會寫入 Google Sheet，並立即顯示今日累積熱量。
 
 ## 使用方式
 
-第一次傳送文字訊息時，Bot 會要求提供 Google Sheet 連結。試算表必須授權給設定於 `GOOGLE_SERVICE_ACCOUNT_INFO` 的服務帳戶。
+第一次使用時，Bot 會引導使用者建立 Google Sheet、分享給 `GOOGLE_SERVICE_ACCOUNT_INFO` 中的服務帳戶 Email，再貼上試算表連結。連結完成後可設定個人每日熱量目標，也可略過。
 
-連結成功後可使用以下指令：
+連結成功後，Bot 會在訊息下方顯示功能按鈕。原本文字指令仍可使用：
 
 | 指令 | 說明 |
 | --- | --- |
 | `新增` | 依序輸入種類、名稱與熱量，新增一筆紀錄 |
-| `清除` | 清除試算表內所有飲食紀錄 |
-| `刪除上一筆` | 刪除最新一筆紀錄 |
+| `拍照說明` | 顯示拍照提示與開啟相機按鈕 |
+| `今日` | 查看今日累積熱量與目標進度 |
+| `近7日` | 查看最近 7 日總熱量 |
+| `設定` | 設定個人的每日熱量目標 |
+| `清除` | 限時二次確認後清除試算表內所有飲食紀錄 |
+| `刪除上一筆` | 預覽並撤銷上一餐的全部品項 |
 | `加總` | 選擇最近 1 天或 7 天，計算總熱量 |
-| `飲食比例` | 計算各種類占總熱量的比例 |
+| `飲食比例` | 選擇今日、近 7 日或全部期間後計算種類比例 |
 | `查詢大卡` | 查詢內建食物資料庫 |
 
-也可以直接傳送圖片。Bot 會辨識照片中的主要食物與飲料，並回覆各品項及預估熱量。
+也可以直接傳送圖片。Bot 會先回覆「正在分析」，接著列出主要食物、飲料、可信度與熱量。使用者可以確認、修改熱量、重新拍照或取消。
+
+飲食 Sheet 使用以下欄位：`timestamp`、`category`、`name`、`calories`、`meal_id`。舊版四欄 Sheet 會在下次操作時原地加入 `meal_id` 欄，不會搬動既有資料。
 
 ## 技術架構
 
@@ -62,6 +74,8 @@ cp .env.example .env
 | `OPENAI_IMAGE_DETAIL` | 否 | 圖片細節等級，預設 `low` |
 | `IMAGE_MAX_SIZE` | 否 | 圖片最長邊，預設 `768` |
 | `IMAGE_JPEG_QUALITY` | 否 | JPEG 品質，預設 `88` |
+| `DAILY_CALORIE_TARGET` | 否 | 尚未設定個人目標時的預設值；`0` 代表只顯示累積 |
+| `PENDING_ACTION_TTL_MINUTES` | 否 | 清除、撤銷與圖片確認按鈕的有效分鐘數，預設 `10` |
 
 不要提交 `.env`。專案的 `.gitignore` 已排除 `.env`。
 
@@ -81,6 +95,22 @@ python app.py
 ```text
 https://your-domain.example/callback
 ```
+
+## LINE Rich Menu
+
+先產生預覽確認排版：
+
+```bash
+python setup_rich_menu.py --preview rich-menu-preview.png
+```
+
+確認後，以 `.env` 中的 LINE token 建立並設為預設 Rich Menu：
+
+```bash
+python setup_rich_menu.py
+```
+
+工具會重用同名 Rich Menu，不會因重複執行持續建立副本。選單包含拍照記錄、今日進度、近 7 日、手動新增、飲食比例與個人設定。
 
 ## Render 部署
 
@@ -104,8 +134,9 @@ https://your-render-service.onrender.com/callback
 先確認程式可以載入：
 
 ```bash
-python -m py_compile app.py cv_analyzer.py image_utils.py
+python -m py_compile app.py cv_analyzer.py image_utils.py setup_rich_menu.py
 python -c "import app; print('app import ok')"
+python -m unittest discover -s tests -v
 ```
 
 部署後可在 LINE Developers Console 執行 Verify，確認 webhook 回傳 `200 OK`。最後從 LINE 對 Bot 傳送一張包含食物或飲料的照片，確認完整流程：
@@ -115,12 +146,15 @@ LINE 圖片訊息
 -> Render webhook
 -> 圖片壓縮
 -> OpenAI 圖片辨識
--> LINE 回覆熱量結果
+-> LINE 顯示確認按鈕
+-> 確認後寫入 Google Sheet
+-> LINE 回覆今日進度
 ```
 
 ## 注意事項
 
 - 圖片辨識與熱量為估算值，不適合作為醫療或營養診斷依據。
-- 使用者的 Google Sheet 綁定保存在 Config Sheet；尚未完成的輸入階段仍只存在應用程式記憶體中。
+- 使用者的 Google Sheet 綁定與個人熱量目標保存在 Config Sheet。
+- 尚未確認的圖片與輸入階段只存在應用程式記憶體中；服務重啟後舊按鈕會安全失效，不會寫入或刪除資料。
 - 建議在 OpenAI 平台設定專案預算與用量通知。
 - 正式環境應檢查 Render logs，並監控 LINE webhook timeout 與 OpenAI API 錯誤。

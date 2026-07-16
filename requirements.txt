@@ -1,7 +1,7 @@
 python-dotenv
-openpyxl
 flask
-line-bot-sdk
+gunicorn
+line-bot-sdk>=3,<4
 gspread
 google-auth
 Pillow
