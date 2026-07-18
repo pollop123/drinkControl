@@ -14,15 +14,15 @@ from linebot.models import (
 from PIL import Image, ImageDraw, ImageFont
 
 
-MENU_NAME = "drinkControl Main Menu v1"
+MENU_NAME = "drinkControl Main Menu v2"
 MENU_WIDTH = 2500
 MENU_HEIGHT = 1686
 MENU_ITEMS = [
     ("拍照記錄", "拍照說明", "CAMERA"),
-    ("今日進度", "今日", "TODAY"),
-    ("近 7 日", "近7日", "7 DAYS"),
-    ("手動新增", "新增", "ADD"),
-    ("飲食比例", "飲食比例", "RATIO"),
+    ("今日餐次", "今日餐次", "TODAY"),
+    ("歷史紀錄", "歷史紀錄", "HISTORY"),
+    ("最近餐點", "最近餐點", "RECENT"),
+    ("每週報告", "每週報告", "WEEKLY"),
     ("個人設定", "設定", "SETTINGS"),
 ]
 COLORS = ["#E9F5EE", "#EAF0FA", "#F7F0E5", "#F8EBE8", "#EFEAFA", "#E8F4F6"]

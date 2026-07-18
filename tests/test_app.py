@@ -1,4 +1,5 @@
 import os
+import re
 import sys
 import unittest
 from datetime import timedelta
@@ -55,13 +56,21 @@ class FakeSheet:
         self.values.extend(list(row) for row in rows)
 
     def update(self, range_name, values):
-        start, end = range_name.split(":")
-        start_column = ord(start[0]) - ord("A")
-        row_number = int(start[1:])
-        end_column = ord(end[0]) - ord("A")
-        self._ensure_size(row_number, end_column + 1)
-        for offset, value in enumerate(values[0]):
-            self.values[row_number - 1][start_column + offset] = value
+        start, end = (
+            range_name.split(":", 1) if ":" in range_name else (range_name, range_name)
+        )
+        start_match = re.fullmatch(r"([A-Z]+)(\d+)", start)
+        end_match = re.fullmatch(r"([A-Z]+)(\d+)", end)
+        start_column = ord(start_match.group(1)) - ord("A")
+        start_row = int(start_match.group(2))
+        end_column = ord(end_match.group(1)) - ord("A")
+        end_row = int(end_match.group(2))
+        self._ensure_size(end_row, end_column + 1)
+        for row_offset, value_row in enumerate(values):
+            for column_offset, value in enumerate(value_row):
+                self.values[start_row - 1 + row_offset][
+                    start_column + column_offset
+                ] = value
 
     def get_all_values(self):
         return [list(row) for row in self.values]
@@ -126,13 +135,14 @@ class Obj:
     pass
 
 
-def postback_event(data, user_id="u1"):
+def postback_event(data, user_id="u1", params=None):
     event = Obj()
     event.reply_token = "reply"
     event.source = Obj()
     event.source.user_id = user_id
     event.postback = Obj()
     event.postback.data = data
+    event.postback.params = params or {}
     return event
 
 
@@ -166,11 +176,15 @@ class DrinkControlFlowTests(unittest.TestCase):
         app.line_bot_api = FakeBot()
         app.user_sheets.clear()
         app.user_targets.clear()
+        app.user_weekly_reports.clear()
+        app.user_weekly_report_sent.clear()
         app.user_input_stage.clear()
         app.user_input_data.clear()
         app.pending_image_records.clear()
         app.pending_clear_actions.clear()
         app.pending_delete_actions.clear()
+        app.pending_repeat_actions.clear()
+        app.pending_item_delete_actions.clear()
         app.user_sheets["u1"] = "sheet"
 
     def test_onboarding_links_sheet_then_sets_personal_target(self):
@@ -210,6 +224,145 @@ class DrinkControlFlowTests(unittest.TestCase):
             self.sheet.values[1][:4],
             ["2026-07-17 08:00:00", "主食", "白飯", "280"],
         )
+        self.assertTrue(self.sheet.values[1][4])
+        self.assertTrue(self.sheet.values[1][5])
+
+    def test_five_column_sheet_adds_stable_item_ids(self):
+        self.sheet.values = [
+            app.LEGACY_RECORD_HEADERS_WITH_MEAL_ID,
+            ["2026-07-17 08:00:00", "主食", "白飯", "280", "meal-1"],
+            ["2026-07-17 08:00:00", "蛋白質", "雞肉", "180", "meal-1"],
+        ]
+        app.get_record_sheet("sheet")
+        self.assertEqual(self.sheet.values[0], app.RECORD_HEADERS)
+        self.assertEqual(self.sheet.values[1][4], "meal-1")
+        self.assertTrue(self.sheet.values[1][5])
+        self.assertNotEqual(self.sheet.values[1][5], self.sheet.values[2][5])
+
+    def test_today_and_selected_history_return_editable_meal_cards(self):
+        today = app.taipei_now().strftime("%Y-%m-%d %H:%M:%S")
+        self.sheet.values = [
+            app.RECORD_HEADERS,
+            [today, "主食", "白飯", "280", "meal-1", "item-1"],
+            [today, "蛋白質", "雞肉", "180", "meal-1", "item-2"],
+        ]
+        app.handle_message(text_event("今日餐次"))
+        message = app.line_bot_api.replies[-1][1].as_json_dict()
+        actions = message["contents"]["footer"]["contents"]
+        action_data = [button["action"]["data"] for button in actions]
+        self.assertTrue(any("action=edit_meal" in data for data in action_data))
+        self.assertTrue(any("action=repeat_meal" in data for data in action_data))
+        self.assertTrue(
+            any("action=request_delete_meal" in data for data in action_data)
+        )
+
+        date_text = app.taipei_now().strftime("%Y-%m-%d")
+        app.handle_postback(
+            postback_event(
+                "action=history_date",
+                params={"date": date_text},
+            )
+        )
+        self.assertEqual(app.line_bot_api.replies[-1][1].type, "flex")
+
+    def test_specific_saved_item_can_be_edited(self):
+        app.append_image_detections(
+            "sheet",
+            [
+                {"item": "白飯", "category": "主食", "calories": 280},
+                {"item": "雞肉", "category": "蛋白質", "calories": 180},
+            ],
+        )
+        meal = app.get_meals("sheet")[0]
+        item = meal["items"][0]
+        app.handle_postback(
+            postback_event(f"action=edit_meal&meal_id={meal['meal_id']}")
+        )
+        selector = app.line_bot_api.replies[-1][1]
+        self.assertIsNotNone(selector.quick_reply)
+        app.handle_postback(
+            postback_event(
+                f"action=select_edit_item&meal_id={meal['meal_id']}"
+                f"&item_id={item['item_id']}"
+            )
+        )
+        options = app.line_bot_api.replies[-1][1]
+        self.assertEqual(len(options.template.actions), 4)
+
+        app.handle_postback(
+            postback_event(
+                f"action=edit_saved_item&field=calories"
+                f"&meal_id={meal['meal_id']}&item_id={item['item_id']}"
+            )
+        )
+        self.assertEqual(app.user_input_stage["u1"], "edit_saved_item")
+        app.handle_message(text_event("320"))
+        updated = app.get_meal("sheet", meal["meal_id"])
+        updated_item = next(
+            value for value in updated["items"] if value["item_id"] == item["item_id"]
+        )
+        self.assertEqual(updated_item["calories"], 320)
+        self.assertEqual(app.line_bot_api.replies[-1][1].type, "flex")
+
+        app.update_meal_item(
+            "sheet", meal["meal_id"], item["item_id"], "name", "糙米飯"
+        )
+        app.update_meal_item(
+            "sheet", meal["meal_id"], item["item_id"], "category", "主食"
+        )
+        updated = app.get_meal("sheet", meal["meal_id"])
+        self.assertEqual(updated["items"][0]["name"], "糙米飯")
+
+    def test_specific_item_delete_requires_confirmation(self):
+        app.append_image_detections(
+            "sheet",
+            [
+                {"item": "白飯", "category": "主食", "calories": 280},
+                {"item": "雞肉", "category": "蛋白質", "calories": 180},
+            ],
+        )
+        meal = app.get_meals("sheet")[0]
+        item = meal["items"][0]
+        app.handle_postback(
+            postback_event(
+                f"action=request_delete_item&meal_id={meal['meal_id']}"
+                f"&item_id={item['item_id']}"
+            )
+        )
+        self.assertEqual(len(app.get_meal("sheet", meal["meal_id"])["items"]), 2)
+        pending = app.pending_item_delete_actions["u1"]
+        app.handle_postback(
+            postback_event(f"action=confirm_delete_item&token={pending['token']}")
+        )
+        remaining = app.get_meal("sheet", meal["meal_id"])
+        self.assertEqual(len(remaining["items"]), 1)
+        self.assertNotEqual(remaining["items"][0]["item_id"], item["item_id"])
+
+    def test_recent_meal_can_be_repeated_with_new_ids(self):
+        app.append_image_detections(
+            "sheet",
+            [
+                {"item": "白飯", "category": "主食", "calories": 280},
+                {"item": "雞肉", "category": "蛋白質", "calories": 180},
+            ],
+        )
+        original = app.get_meals("sheet")[0]
+        app.handle_message(text_event("最近餐點"))
+        self.assertEqual(app.line_bot_api.replies[-1][1].type, "flex")
+
+        app.handle_postback(
+            postback_event(f"action=repeat_meal&meal_id={original['meal_id']}")
+        )
+        pending = app.pending_repeat_actions["u1"]
+        app.handle_postback(
+            postback_event(f"action=confirm_repeat_meal&token={pending['token']}")
+        )
+        meals = app.get_meals("sheet")
+        self.assertEqual(len(meals), 2)
+        self.assertNotEqual(meals[0]["meal_id"], original["meal_id"])
+        original_item_ids = {item["item_id"] for item in original["items"]}
+        repeated_item_ids = {item["item_id"] for item in meals[0]["items"]}
+        self.assertTrue(original_item_ids.isdisjoint(repeated_item_ids))
 
     def test_photo_items_share_meal_id_and_delete_as_one_meal(self):
         app.append_image_detections(
@@ -347,6 +500,30 @@ class DrinkControlFlowTests(unittest.TestCase):
         self.assertEqual(self.config.values[0], app.CONFIG_HEADERS)
         self.assertEqual(self.config.values[1][3], 1900)
 
+    def test_weekly_report_opt_in_is_persisted(self):
+        app.handle_message(text_event("開啟週報"))
+        self.assertTrue(app.user_weekly_reports["u1"])
+        self.assertEqual(self.config.values[1][4], "TRUE")
+        app.handle_message(text_event("關閉週報"))
+        self.assertFalse(app.user_weekly_reports["u1"])
+        self.assertEqual(self.config.values[1][4], "FALSE")
+
+    def test_weekly_settings_reload_after_restart(self):
+        self.config.values = [
+            app.CONFIG_HEADERS,
+            ["u1", "sheet", "2026-07-17 08:00:00", "1800", "TRUE", "2026-07-14"],
+        ]
+        app.user_sheets.clear()
+        app.user_targets.clear()
+        app.user_weekly_reports.clear()
+        app.user_weekly_report_sent.clear()
+        app.config_sheet = None
+        app.load_user_sheet_bindings()
+        self.assertEqual(app.user_sheets["u1"], "sheet")
+        self.assertEqual(app.user_targets["u1"], 1800)
+        self.assertTrue(app.user_weekly_reports["u1"])
+        self.assertEqual(app.user_weekly_report_sent["u1"], "2026-07-14")
+
     def test_ratio_period_filters_today(self):
         today = app.taipei_now().strftime("%Y-%m-%d %H:%M:%S")
         old = (app.taipei_now() - timedelta(days=10)).strftime("%Y-%m-%d %H:%M:%S")
@@ -362,6 +539,58 @@ class DrinkControlFlowTests(unittest.TestCase):
         app.handle_message(text_event("飲食比例"))
         app.handle_message(text_event("今日比例"))
         self.assertIn("主食: 75.0%", app.line_bot_api.replies[-1][1].text)
+
+    def test_weekly_report_contains_trends_and_categories(self):
+        now = app.taipei_now()
+        this_week = now.strftime("%Y-%m-%d %H:%M:%S")
+        earlier_this_week = (now - timedelta(days=2)).strftime("%Y-%m-%d %H:%M:%S")
+        previous_week = (now - timedelta(days=8)).strftime("%Y-%m-%d %H:%M:%S")
+        self.sheet.values = [
+            app.RECORD_HEADERS,
+            [this_week, "主食", "白飯", "600", "m1", "i1"],
+            [earlier_this_week, "蛋白質", "雞肉", "400", "m2", "i2"],
+            [previous_week, "點心", "蛋糕", "500", "m3", "i3"],
+        ]
+        app.user_targets["u1"] = 1800
+        report = app.calculate_weekly_report("sheet", "u1")
+        self.assertEqual(report["total_calories"], 1000)
+        self.assertEqual(report["recorded_days"], 2)
+        self.assertEqual(report["goal_days"], 2)
+        self.assertIn("增加", report["comparison_text"])
+        self.assertEqual(report["category_ratios"][0][0], "主食")
+
+        app.handle_message(text_event("每週報告"))
+        message = app.line_bot_api.replies[-1][1]
+        self.assertEqual(message.type, "flex")
+        self.assertIn("每週飲食報告", message.alt_text)
+
+    def test_scheduled_weekly_report_requires_auth_and_opt_in(self):
+        now = app.taipei_now().strftime("%Y-%m-%d %H:%M:%S")
+        self.sheet.values = [
+            app.RECORD_HEADERS,
+            [now, "主食", "白飯", "600", "m1", "i1"],
+        ]
+        app.user_weekly_reports["u1"] = True
+        app.CRON_SECRET = "cron-test"
+        bot = FakeImageBot()
+        app.line_bot_api = bot
+        client = app.app.test_client()
+
+        unauthorized = client.post("/cron/weekly-report")
+        self.assertEqual(unauthorized.status_code, 401)
+        result = client.post(
+            "/cron/weekly-report",
+            headers={"Authorization": "Bearer cron-test"},
+        )
+        self.assertEqual(result.status_code, 200)
+        self.assertEqual(result.get_json()["sent"], 1)
+        self.assertEqual(len(bot.pushes), 1)
+        repeated = client.post(
+            "/cron/weekly-report",
+            headers={"Authorization": "Bearer cron-test"},
+        )
+        self.assertEqual(repeated.get_json()["sent"], 0)
+        self.assertEqual(len(bot.pushes), 1)
 
     def test_rich_menu_has_six_full_coverage_areas(self):
         rich_menu = setup_rich_menu.build_rich_menu()

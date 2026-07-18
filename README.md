@@ -15,6 +15,10 @@ drinkControl 是以 Flask 建立的 LINE 飲食紀錄 Bot。使用者可以傳�
 - 顯示今日熱量進度與最近 7 日總熱量
 - 每位使用者可設定自己的每日熱量目標
 - 以餐次識別碼整餐撤銷，不會只刪除照片中的最後一個品項
+- 以 LINE Flex 卡片查看今日、指定日期與最近餐次
+- 從餐次卡片修改指定品項的名稱、分類或熱量
+- 將最近餐點「再記一次」，不需重新辨識照片
+- 產生近 7 日週報，並可選擇開啟自動推送
 - 統計最近 1 天或 7 天的總熱量
 - 計算各食物種類的熱量比例
 - 查詢內建食物資料庫的熱量與份量
@@ -33,6 +37,10 @@ drinkControl 是以 Flask 建立的 LINE 飲食紀錄 Bot。使用者可以傳�
 | `拍照說明` | 顯示拍照提示與開啟相機按鈕 |
 | `今日` | 查看今日累積熱量與目標進度 |
 | `近7日` | 查看最近 7 日總熱量 |
+| `今日餐次` | 以卡片查看今天每一餐並編輯、再記或刪除 |
+| `歷史紀錄` | 查看昨天、近 7 日或指定日期的餐次 |
+| `最近餐點` | 查看最近五餐並可直接再記一次 |
+| `每週報告` | 查看熱量趨勢、記錄天數與分類比例 |
 | `設定` | 設定個人的每日熱量目標 |
 | `清除` | 限時二次確認後清除試算表內所有飲食紀錄 |
 | `刪除上一筆` | 預覽並撤銷上一餐的全部品項 |
@@ -42,7 +50,7 @@ drinkControl 是以 Flask 建立的 LINE 飲食紀錄 Bot。使用者可以傳�
 
 也可以直接傳送圖片。Bot 會先回覆「正在分析」，接著列出主要食物、飲料、可信度與熱量。使用者可以確認、修改熱量、重新拍照或取消。
 
-飲食 Sheet 使用以下欄位：`timestamp`、`category`、`name`、`calories`、`meal_id`。舊版四欄 Sheet 會在下次操作時原地加入 `meal_id` 欄，不會搬動既有資料。
+飲食 Sheet 使用以下欄位：`timestamp`、`category`、`name`、`calories`、`meal_id`、`item_id`。`meal_id` 用來識別整餐，`item_id` 用來安全編輯指定品項。舊版四欄或五欄 Sheet 會在下次操作時原地補齊識別欄，不會搬動既有資料。
 
 ## 技術架構
 
@@ -76,6 +84,7 @@ cp .env.example .env
 | `IMAGE_JPEG_QUALITY` | 否 | JPEG 品質，預設 `88` |
 | `DAILY_CALORIE_TARGET` | 否 | 尚未設定個人目標時的預設值；`0` 代表只顯示累積 |
 | `PENDING_ACTION_TTL_MINUTES` | 否 | 清除、撤銷與圖片確認按鈕的有效分鐘數，預設 `10` |
+| `CRON_SECRET` | 自動週報需要 | 保護 `/cron/weekly-report` 的長隨機密鑰 |
 
 不要提交 `.env`。專案的 `.gitignore` 已排除 `.env`。
 
@@ -110,7 +119,18 @@ python setup_rich_menu.py --preview rich-menu-preview.png
 python setup_rich_menu.py
 ```
 
-工具會重用同名 Rich Menu，不會因重複執行持續建立副本。選單包含拍照記錄、今日進度、近 7 日、手動新增、飲食比例與個人設定。
+工具會重用同名 Rich Menu，不會因重複執行持續建立副本。新版選單包含拍照記錄、今日餐次、歷史紀錄、最近餐點、每週報告與個人設定。
+
+## 自動每週報告
+
+使用者可在「個人設定」開啟或關閉自動週報。設定 `CRON_SECRET` 後，每週由 Render Cron Job 呼叫：
+
+```bash
+curl -X POST https://your-render-service.onrender.com/cron/weekly-report \
+  -H "Authorization: Bearer $CRON_SECRET"
+```
+
+建議排程在每週日晚上。端點只會推送給已主動開啟週報且近 7 日有紀錄的使用者；未帶正確密鑰會回傳 `401`。
 
 ## Render 部署
 
@@ -134,7 +154,7 @@ https://your-render-service.onrender.com/callback
 先確認程式可以載入：
 
 ```bash
-python -m py_compile app.py cv_analyzer.py image_utils.py setup_rich_menu.py
+python -m py_compile app.py cv_analyzer.py image_utils.py meal_views.py setup_rich_menu.py
 python -c "import app; print('app import ok')"
 python -m unittest discover -s tests -v
 ```
